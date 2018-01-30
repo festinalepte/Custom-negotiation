@@ -1,0 +1,43 @@
+<?php
+
+/**
+ * Implements hook_install()
+ */
+function custom_negotiation_install() {
+  if (!(taxonomy_vocabulary_machine_name_load(CUSTOM_NEGOTITATION_COUNTRIES_VOCABULARY))) {
+
+    // Create a taxonomy and attach a field to it.
+    $term = new stdClass();
+    $term->name = t('Countries');
+    $term->machine_name = CUSTOM_NEGOTITATION_COUNTRIES_VOCABULARY;
+    $term->description = t('Description');
+    $term->heirarchy = 1;
+    $term->module = 'custom_negotiation';
+    $term->weight = 1;
+    taxonomy_vocabulary_save($term);
+    // Create a field
+    $field = array(
+      'field_name' => 'field_country_code',
+      'type' => 'text',
+      'label' => t('Country code')
+    );
+    field_create_field($field);
+
+    // Attach the field to taxonomy entity
+    $instance = array(
+      'field_name' => 'field_country_code',
+      'entity_type' => 'taxonomy_term',
+      'bundle' => CUSTOM_NEGOTITATION_COUNTRIES_VOCABULARY,
+      'label' => t('Country code'),
+      'required' => TRUE,
+      'widget' => array(
+        'type' => 'text_textfield',
+        'weight' => 3,
+        'settings' => array(
+          'size' => 5,
+        ),
+      )
+    );
+    field_create_instance($instance);
+  }
+}

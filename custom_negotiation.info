@@ -1,0 +1,5 @@
+name = Custom negotitation
+description = Custom language detection method that supports URLs like http://example.com/ca-en, .../ca-fr, .../be-fr etc.
+core = 7.x
+package = Custom
+dependencies[] = locale

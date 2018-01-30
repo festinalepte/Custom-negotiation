@@ -1,0 +1,242 @@
+<?php
+
+/**
+ * @file
+ *
+ * Main module file.
+ */
+
+// Custom taxonomy vocabulary machine name.
+define('CUSTOM_NEGOTITATION_COUNTRIES_VOCABULARY', 'countries');
+
+/**
+ * Implements hook_language_negotiation_info().
+ */
+function custom_negotiation_language_negotiation_info() {
+  return array(
+    'custom_negotiation_language_provider' => array(
+      'callbacks' => array(
+        'language' => 'custom_negotiation_language_getter_url',
+        'switcher' => 'custom_negotiation_language_switcher_url',
+        'url_rewrite' => 'custom_negotiation_language_url_rewrite_url',
+      ),
+      'file' => drupal_get_path('module', 'custom_negotiation') . '/custom_negotiation.module',
+      'weight' => -4,
+      'name' => t('Custom country-language negotiation provider'),
+      'description' => t('This is a custom language negotiation provider.'),
+      'cache' => 0,
+    ),
+  );
+}
+
+/**
+ * Identify language via URL prefix or domain.
+ *
+ * @param array $languages
+ *   An array of valid language objects.
+ *
+ * @return mixed
+ *   A valid language code on success, 404 otherwise.
+ */
+function custom_negotiation_language_getter_url($languages) {
+  // $_GET['q'] might not be available at this time, because
+  // path initialization runs after the language bootstrap phase.
+  list($language, $_GET['q']) = custom_negotiation_split_prefix(isset($_GET['q']) ? $_GET['q'] : NULL, $languages);
+  if ($language !== FALSE) {
+    $language_url = $language->language;
+  } else {
+    return FALSE;
+  }
+  return $language_url;
+}
+
+/**
+ * Return the URL language switcher block.
+ *
+ * Translation links may be provided by other modules.
+ *
+ * @param string $path
+ *   Path for link.
+ *
+ * @return array
+ *   Return language links.
+ */
+function custom_negotiation_language_switcher_url($type, &$path) {
+  $languages = language_list('enabled');
+  $links = array();
+  foreach ($languages[1] as $language) {
+    $links[$language->language] = array(
+      'href' => $path,
+      'title' => $language->native,
+      'language' => $language,
+      'attributes' => array('class' => array('language-link')),
+    );
+  }
+  return $links;
+}
+
+/**
+ * @param string $prefix
+ *   Path prefix for language.
+ * @return array
+ *   Return current country info.
+ */
+function custom_negotiation_split_country_prefix($prefix) {
+  // Get names of vocabularies.
+  $query = db_select('taxonomy_vocabulary', 'tv');
+  $query->condition('tv.machine_name', CUSTOM_NEGOTITATION_COUNTRIES_VOCABULARY);
+  $query->fields('tv', array('name', 'machine_name', 'vid'));
+  $vocabularies = $query->execute()->fetchAllAssoc('machine_name');
+
+  // If we have needed vocabulary, we will get all terms from it.
+  if (isset($vocabularies)) {
+    $countries_vid = $vocabularies[CUSTOM_NEGOTITATION_COUNTRIES_VOCABULARY]->vid;
+    $countries = custom_negotiation_get_availabel_countries($countries_vid);
+    $countries_prefixes = array();
+    if (is_array($countries)) {
+      foreach ($countries[$countries_vid] as $country) {
+        $countries_prefixes[] = $country->field_country_code_value;
+      }
+      // Split path prefix, for getting country code.
+      $prefix_arg = explode('-', $prefix);
+      $country_prefix = array_shift($prefix_arg);
+      if (count($countries_prefixes) !== 0 && in_array($country_prefix, $countries_prefixes, NULL)) {
+        $country = custom_negotiation_country_load($country_prefix);
+        if ($country) {
+          /** @var array $country */
+          return $country;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Splits the given path into prefix and actual path.
+ *
+ * Parse the given path and return the language object identified by the prefix
+ * of country and the actual path.
+ *
+ * @param string $path
+ *   The path to split.
+ * @param array $languages
+ *   An array of valid languages.
+ *
+ * @return array
+ *   An array composed of:
+ *    - A language object corresponding to the identified prefix on success,
+ *      FALSE otherwise.
+ *    - The path without the prefix on success, the given path otherwise.
+ */
+function custom_negotiation_split_prefix($path, $languages) {
+  $args = empty($path) ? array() : explode('/', $path);
+  $prefix = array_shift($args);
+  $prefix_arg = explode('-', $prefix);
+  $country_prefix = array_shift($prefix_arg);
+  $language_prefix = array_pop($prefix_arg);
+  $country_available = (array)custom_negotiation_split_country_prefix($prefix);
+  if (is_array($country_available) && count($country_available) > 0) {
+    foreach ($languages as $language) {
+      if (!empty($language->prefix) && $language->prefix == $language_prefix && $country_prefix) {
+        // For path rewriting.
+        setcookie('country_prefix', $country_available['field_country_code_value']);
+        // Rebuild $path with the language removed.
+        return array($language, implode('/', $args));
+      } elseif (!empty($language->language) && $language->language == $language_prefix && $country_prefix) {
+        // For path rewriting.
+        setcookie('country_prefix', $country_available['field_country_code_value']);
+        // Rebuild $path with the language removed.
+        return array($language, implode('/', $args));
+      }
+    }
+  }
+  return array(FALSE, $path);
+}
+
+/**
+ *  Rewrite URLs for the URL language provider.
+ *
+ * @param string $path
+ *   The path to split.
+ * @param $options
+ *
+ */
+function custom_negotiation_language_url_rewrite_url(&$path, &$options) {
+  global $language_url;
+  static $drupal_static_fast;
+
+  if (!isset($drupal_static_fast)) {
+    $drupal_static_fast['languages'] = &drupal_static(__FUNCTION__);
+  }
+  $languages = &$drupal_static_fast['languages'];
+
+  if (!isset($languages)) {
+    $languages = language_list('enabled');
+    $languages = array_flip(array_keys($languages[1]));
+  }
+
+  // Language can be passed as an option, or we go for current URL language.
+  if (!isset($options['language'])) {
+    $options['language'] = $language_url;
+  } // We allow only enabled languages here.
+  elseif (!isset($languages[$options['language']->language])) {
+    unset($options['language']);
+    return;
+  }
+
+  if (isset($options['language'])) {
+    if (!empty($options['language']->prefix) && !empty($_COOKIE['country_prefix']) && !isset($options['country'])) {
+      $options['prefix'] = $_COOKIE['country_prefix'] . '-' . $options['language']->prefix . '/';
+    } elseif (!empty($options['language']->prefix) && isset($options['country'])) {
+      $options['prefix'] = $options['country'] . '-' . $options['language']->prefix . '/';
+    }
+  }
+}
+
+/**
+ * Helping function for getting taxonomy terms data.
+ *
+ * @param $vid
+ *   Vocabulary id.
+ * @return array|mixed
+ *   Country code list.
+ */
+function custom_negotiation_get_availabel_countries($vid) {
+  $terms = &drupal_static(__FUNCTION__ . ':terms', array());
+  $query = db_select('taxonomy_term_data', 't');
+  $query->join('field_data_field_country_code', 'cc', 'cc.entity_id = t.tid');
+  $result = $query
+    ->addTag('translatable')
+    ->addTag('term_access')
+    ->fields('t')
+    ->fields('cc', array('field_country_code_value'))
+    ->condition('t.vid', $vid)
+    ->orderBy('t.weight')
+    ->orderBy('t.name')
+    ->execute();
+  foreach ($result as $term) {
+    $terms[$vid][$term->tid] = $term;
+  }
+  return $terms;
+}
+
+/**
+ * Helping function for getting taxonomy term data based on country_code field.
+ *
+ * @param null $country_code
+ *   Country code.
+ *
+ * @return bool
+ *   Return country.
+ */
+function custom_negotiation_country_load($country_code = NULL) {
+  if ($country_code !== NULL) {
+    $query = db_select('taxonomy_term_data', 't');
+    $query->join('field_data_field_country_code', 'cc', 'cc.entity_id = t.tid');
+    $query->fields('t', array('name', 'tid'));
+    $query->fields('cc', array('field_country_code_value'));
+    $query->condition('cc.field_country_code_value', $country_code, '=');
+    return $query->execute()->fetchAssoc();
+  }
+  return FALSE;
+}
