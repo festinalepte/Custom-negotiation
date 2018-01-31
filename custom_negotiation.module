@@ -4,6 +4,7 @@
  * @file
  *
  * Main module file.
+ * This module provides new language detection method based on country/language prefixes.
  */
 
 // Custom taxonomy vocabulary machine name.
@@ -64,7 +65,8 @@ function custom_negotiation_language_getter_url($languages) {
 function custom_negotiation_language_switcher_url($type, &$path) {
   $languages = language_list('enabled');
   $links = array();
-  foreach ($languages[1] as $language) {
+  $languages_data = current($languages);
+  foreach ($languages_data as $language) {
     $links[$language->language] = array(
       'href' => $path,
       'title' => $language->native,
